@@ -1,0 +1,9 @@
+tensorflow==2.15.1
+kfp==2.7.0
+numpy==1.24.4
+pandas==2.1.4
+mlflow==2.21.3
+boto3==1.37.33
+minio==7.2.15
+kubernetes==26.1.0
+matplotlib==3.8.4
