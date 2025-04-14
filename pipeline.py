@@ -34,9 +34,6 @@ def digits_recognizer_mlflow_pipeline(
         no_epochs: Number of training epochs
         optimizer: Optimizer to use for training
         mlflow_experiment: MLflow experiment name for tracking
-    
-    Returns:
-        Dictionary with pipeline outputs including model metrics
     """
     # Step 1: Data Acquisition
     data_task = get_data_batch()
@@ -59,11 +56,3 @@ def digits_recognizer_mlflow_pipeline(
     # Step 5: Model Serving
     serving_task = model_serving()
     serving_task.after(model_task)
-    
-    # Return pipeline outputs
-    return {
-        'model_accuracy': model_task.outputs['output_model_accuracy'],
-        'model_loss': model_task.outputs['output_model_loss'],
-        'mlflow_run_id': model_task.outputs['mlflow_run_id'],
-        'inference_service': serving_task.output
-    }

@@ -1,0 +1,696 @@
+# PIPELINE DEFINITION
+# Name: digits-recognizer-mlflow-pipeline
+# Description: MNIST digit recognition pipeline with MLflow integration
+# Inputs:
+#    mlflow_experiment: str [Default: 'digits-recognizer-kfp']
+#    no_epochs: int [Default: 3.0]
+#    optimizer: str [Default: 'adam']
+# Outputs:
+#    model-building-with-mlflow-model_metrics: system.Metrics
+components:
+  comp-get-data-batch:
+    executorLabel: exec-get-data-batch
+    outputDefinitions:
+      artifacts:
+        dataset_summary:
+          artifactType:
+            schemaTitle: system.Markdown
+            schemaVersion: 0.0.1
+      parameters:
+        dataset_version:
+          parameterType: STRING
+        test_samples:
+          parameterType: NUMBER_DOUBLE
+        train_samples:
+          parameterType: NUMBER_DOUBLE
+  comp-get-latest-data:
+    executorLabel: exec-get-latest-data
+  comp-model-building-with-mlflow:
+    executorLabel: exec-model-building-with-mlflow
+    inputDefinitions:
+      parameters:
+        experiment_name:
+          defaultValue: digits-recognizer
+          description: MLflow experiment name for tracking
+          isOptional: true
+          parameterType: STRING
+        no_epochs:
+          description: Number of training epochs
+          parameterType: NUMBER_INTEGER
+        optimizer:
+          description: Optimizer to use (e.g., 'adam', 'sgd')
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        model_metrics:
+          artifactType:
+            schemaTitle: system.Metrics
+            schemaVersion: 0.0.1
+        model_view:
+          artifactType:
+            schemaTitle: system.Artifact
+            schemaVersion: 0.0.1
+      parameters:
+        mlflow_run_id:
+          parameterType: STRING
+        output_model_accuracy:
+          parameterType: NUMBER_DOUBLE
+        output_model_loss:
+          parameterType: NUMBER_DOUBLE
+  comp-model-serving:
+    executorLabel: exec-model-serving
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+  comp-reshape-data:
+    executorLabel: exec-reshape-data
+    outputDefinitions:
+      artifacts:
+        reshape_summary:
+          artifactType:
+            schemaTitle: system.Markdown
+            schemaVersion: 0.0.1
+deploymentSpec:
+  executors:
+    exec-get-data-batch:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - get_data_batch
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.7.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef get_data_batch() -> NamedTuple(\n    \"Outputs\",\n    [\n  \
+          \      (\"dataset_summary\", Markdown), \n        (\"train_samples\", float),\n\
+          \        (\"test_samples\", float),\n        (\"dataset_version\", str),\n\
+          \    ]\n):\n    \"\"\"\n    Downloads MNIST dataset using Keras and uploads\
+          \ arrays to MinIO storage.\n\n    Returns:\n        NamedTuple containing\
+          \ dataset summary markdown, train/test sample counts,\n        and dataset\
+          \ version.\n    \"\"\"\n    import json\n    import os\n    import numpy\
+          \ as np\n    from tensorflow import keras\n    from minio import Minio\n\
+          \n    print(\"Getting data using Keras...\")\n\n    # Download data using\
+          \ Keras\n    (x_train, y_train), (x_test, y_test) = keras.datasets.mnist.load_data()\n\
+          \    print(f\"Data loaded: x_train shape: {x_train.shape}, y_train shape:\
+          \ {y_train.shape}\")\n\n    # --- Connect to MinIO ---\n    # Verify MinIO\
+          \ connection variables - debugging output\n    print(\"Setting up MinIO\
+          \ connection...\")\n    minio_endpoint = \"localhost:9000\"\n    minio_access_key\
+          \ = \"minio\"\n    # Modified secret key - this MUST match exactly what's\
+          \ configured on your MinIO server\n    minio_secret_key = \"minioadmin\"\
+          \n    minio_bucket = \"mlpipeline\"\n\n    print(f\"MinIO endpoint: {minio_endpoint}\"\
+          )\n    print(f\"MinIO access key: {minio_access_key}\")\n    print(f\"MinIO\
+          \ bucket: {minio_bucket}\")\n\n    try:\n        minio_client = Minio(\n\
+          \            minio_endpoint,\n            access_key=minio_access_key,\n\
+          \            secret_key=minio_secret_key,\n            secure=False  # Set\
+          \ to True if using HTTPS\n        )\n\n        # Check if bucket exists\
+          \ and create it if it doesn't\n        if not minio_client.bucket_exists(minio_bucket):\n\
+          \            print(f\"Bucket {minio_bucket} does not exist, creating it...\"\
+          )\n            minio_client.make_bucket(minio_bucket)\n            print(f\"\
+          Created bucket: {minio_bucket}\")\n        else:\n            print(f\"\
+          Bucket {minio_bucket} already exists\")\n\n    except Exception as e:\n\
+          \        print(f\"ERROR setting up MinIO client: {e}\")\n        raise\n\
+          \n    # Define paths\n    local_tmp_dir = \"/tmp\"\n    data_paths = {\n\
+          \        \"x_train\": \"x_train\",\n        \"y_train\": \"y_train\",\n\
+          \        \"x_test\": \"x_test\",\n        \"y_test\": \"y_test\"\n    }\n\
+          \n    local_paths = {k: os.path.join(local_tmp_dir, v + \".npy\") for k,\
+          \ v in data_paths.items()}\n\n    # Save arrays locally and upload to MinIO\n\
+          \    print(\"Saving data arrays locally and uploading to MinIO...\")\n\n\
+          \    for data_key, array in [\n        (\"x_train\", x_train),\n       \
+          \ (\"y_train\", y_train),\n        (\"x_test\", x_test),\n        (\"y_test\"\
+          , y_test)\n    ]:\n        local_path = local_paths[data_key]\n        remote_path\
+          \ = data_paths[data_key]\n\n        # Save locally\n        print(f\"Saving\
+          \ {data_key} to {local_path}\")\n        np.save(local_path, array)\n\n\
+          \        # Upload to MinIO\n        try:\n            print(f\"Uploading\
+          \ {data_key} to {minio_bucket}/{remote_path}\")\n            minio_client.fput_object(minio_bucket,\
+          \ remote_path, local_path)\n            print(f\"Successfully uploaded {data_key}\"\
+          )\n        except Exception as e:\n            print(f\"ERROR uploading\
+          \ {data_key}: {e}\")\n            raise\n\n        # Clean up\n        os.remove(local_path)\n\
+          \n    # Prepare output metadata\n    train_count = float(x_train.shape[0])\n\
+          \    test_count = float(x_test.shape[0])\n    dataset_version = \"1.0\"\n\
+          \n    # Create markdown content\n    markdown_summary = f\"\"\"\n# MNIST\
+          \ Dataset Overview\n\n* **Source:** Keras Datasets (`keras.datasets.mnist.load_data()`)\n\
+          * **Version:** {dataset_version}\n* **Training Samples:** {int(train_count)}\n\
+          * **Test Samples:** {int(test_count)}\n* **Data Shapes:**\n  * Training\
+          \ images: `{x_train.shape}`\n  * Training labels: `{y_train.shape}`\n  *\
+          \ Test images: `{x_test.shape}`\n  * Test labels: `{y_test.shape}`\n* **Storage:**\
+          \ MinIO bucket `{minio_bucket}`\n\"\"\"\n\n    # Format for KFP markdown\
+          \ artifact\n    markdown_artifact_json = {\n        'outputs': [{\n    \
+          \        'type': 'markdown',\n            'storage': 'inline',\n       \
+          \     'source': markdown_summary\n        }]\n    }\n\n    return (\n  \
+          \      json.dumps(markdown_artifact_json),\n        train_count,\n     \
+          \   test_count,\n        dataset_version\n    )\n\n"
+        image: public.ecr.aws/j1r0q0g6/notebooks/notebook-servers/jupyter-tensorflow-full:v1.5.0
+    exec-get-latest-data:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - get_latest_data
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.7.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef get_latest_data():\n    \"\"\"\n    Placeholder component for\
+          \ adding latest data to the dataset.\n\n    In a real-world scenario, this\
+          \ could fetch new data from a database,\n    API, or other data source and\
+          \ merge with existing data.\n    \"\"\"\n    print(\"Component for adding\
+          \ latest data (placeholder)\")\n    # Actual implementation would fetch\
+          \ and integrate new data\n\n"
+        image: public.ecr.aws/j1r0q0g6/notebooks/notebook-servers/jupyter-tensorflow-full:v1.5.0
+    exec-model-building-with-mlflow:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - model_building_with_mlflow
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.7.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'mlflow>=2.0.0'\
+          \ 'boto3' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef model_building_with_mlflow(\n    no_epochs: int,\n    optimizer:\
+          \ str,\n    experiment_name: str = \"digits-recognizer\",\n) -> NamedTuple(\n\
+          \    \"Outputs\",\n    [\n        (\"model_view\", Artifact),\n        (\"\
+          model_metrics\", Metrics),\n        (\"output_model_accuracy\", float),\n\
+          \        (\"output_model_loss\", float),\n        (\"mlflow_run_id\", str)\n\
+          \    ]\n):\n    \"\"\"\n    Build, train, and evaluate a CNN model for digit\
+          \ recognition with MLflow tracking.\n\n    This component:\n    - Creates\
+          \ a CNN model using TensorFlow/Keras\n    - Logs model architecture, parameters,\
+          \ and training config to MLflow\n    - Trains the model on the preprocessed\
+          \ MNIST data\n    - Evaluates model performance on test data\n    - Generates\
+          \ confusion matrix and performance visualizations\n    - Saves model artifacts\
+          \ to MinIO for deployment\n    - Registers the model in MLflow Model Registry\n\
+          \n    Args:\n        no_epochs: Number of training epochs\n        optimizer:\
+          \ Optimizer to use (e.g., 'adam', 'sgd')\n        experiment_name: MLflow\
+          \ experiment name for tracking\n\n    Returns:\n        NamedTuple containing\
+          \ model visualization, metrics, accuracy, loss, \n        and MLflow run\
+          \ ID.\n    \"\"\"\n    import json\n    import os\n    import shutil\n \
+          \   import numpy as np\n    import pandas as pd\n    import tensorflow as\
+          \ tf\n    from tensorflow import keras\n    from minio import Minio\n  \
+          \  import mlflow\n    import mlflow.tensorflow\n    import boto3\n\n   \
+          \ print(f\"Building model with: epochs={no_epochs}, optimizer={optimizer}\"\
+          )\n\n    # ===== Hard-coded configuration =====\n    # MinIO configuration\
+          \ - make sure these match your actual values\n    MINIO_ENDPOINT = \"localhost:9000\"\
+          \n    MINIO_ACCESS_KEY = \"minio\"\n    MINIO_SECRET_KEY = \"minioadmin\"\
+          \n    MINIO_BUCKET = \"mlpipeline\"\n    MINIO_SECURE = False\n\n    # MLflow\
+          \ configuration\n    MLFLOW_TRACKING_URI = \"http://mlflow-server.kubeflow.svc.cluster.local:5000\"\
+          \n    MLFLOW_S3_ENDPOINT_URL = f\"http://{MINIO_ENDPOINT}\"\n    MLFLOW_BUCKET\
+          \ = \"mlflow\"\n\n    # Debug output\n    print(\"=== Configuration ===\"\
+          )\n    print(f\"MinIO endpoint: {MINIO_ENDPOINT}\")\n    print(f\"MinIO\
+          \ access key: {MINIO_ACCESS_KEY}\")\n    print(f\"MinIO bucket: {MINIO_BUCKET}\"\
+          )\n    print(f\"MLflow tracking URI: {MLFLOW_TRACKING_URI}\")\n    print(f\"\
+          MLflow S3 endpoint: {MLFLOW_S3_ENDPOINT_URL}\")\n    print(f\"MLflow experiment:\
+          \ {experiment_name}\")\n\n    # ===== MLflow Setup =====\n    # Configure\
+          \ environment variables\n    os.environ[\"MLFLOW_TRACKING_URI\"] = MLFLOW_TRACKING_URI\n\
+          \    os.environ[\"MLFLOW_S3_ENDPOINT_URL\"] = MLFLOW_S3_ENDPOINT_URL\n \
+          \   os.environ[\"AWS_ACCESS_KEY_ID\"] = MINIO_ACCESS_KEY\n    os.environ[\"\
+          AWS_SECRET_ACCESS_KEY\"] = MINIO_SECRET_KEY\n\n    # Ensure MLflow bucket\
+          \ exists\n    s3_client = boto3.client(\n        \"s3\",\n        endpoint_url=MLFLOW_S3_ENDPOINT_URL,\n\
+          \        aws_access_key_id=MINIO_ACCESS_KEY,\n        aws_secret_access_key=MINIO_SECRET_KEY,\n\
+          \        config=boto3.session.Config(signature_version=\"s3v4\"),\n    )\n\
+          \n    try:\n        buckets_response = s3_client.list_buckets()\n      \
+          \  existing_buckets = [bucket[\"Name\"] for bucket in buckets_response[\"\
+          Buckets\"]]\n\n        if MLFLOW_BUCKET not in existing_buckets:\n     \
+          \       print(f\"Creating MLflow bucket: {MLFLOW_BUCKET}\")\n          \
+          \  s3_client.create_bucket(Bucket=MLFLOW_BUCKET)\n        else:\n      \
+          \      print(f\"MLflow bucket '{MLFLOW_BUCKET}' already exists\")\n    except\
+          \ Exception as e:\n        print(f\"Warning: MLflow bucket check failed:\
+          \ {e}\")\n\n    # Create or get MLflow experiment\n    try:\n        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)\n\
+          \        experiment = mlflow.get_experiment_by_name(experiment_name)\n \
+          \       if experiment is None:\n            experiment_id = mlflow.create_experiment(experiment_name)\n\
+          \            print(f\"Created MLflow experiment: {experiment_name} (ID:\
+          \ {experiment_id})\")\n        else:\n            experiment_id = experiment.experiment_id\n\
+          \            print(f\"Using existing MLflow experiment: {experiment_name}\
+          \ (ID: {experiment_id})\")\n    except Exception as e:\n        print(f\"\
+          MLflow experiment setup issue: {e}\")\n        experiment_id = None\n\n\
+          \    # ===== MinIO Client Setup =====\n    try:\n        minio_client =\
+          \ Minio(\n            MINIO_ENDPOINT,\n            access_key=MINIO_ACCESS_KEY,\n\
+          \            secret_key=MINIO_SECRET_KEY,\n            secure=MINIO_SECURE\n\
+          \        )\n\n        if not minio_client.bucket_exists(MINIO_BUCKET):\n\
+          \            print(f\"Error: Bucket {MINIO_BUCKET} does not exist\")\n \
+          \           raise ValueError(f\"Bucket {MINIO_BUCKET} not found\")\n   \
+          \     else:\n            print(f\"Successfully connected to bucket: {MINIO_BUCKET}\"\
+          )\n    except Exception as e:\n        print(f\"Error connecting to MinIO:\
+          \ {e}\")\n        raise\n\n    # ===== Define paths =====\n    local_tmp_dir\
+          \ = \"/tmp\"\n\n    # Define storage paths\n    storage_paths = {\n    \
+          \    \"x_train\": \"x_train\",\n        \"y_train\": \"y_train\", \n   \
+          \     \"x_test\": \"x_test\",\n        \"y_test\": \"y_test\"\n    }\n\n\
+          \    local_paths = {k: os.path.join(local_tmp_dir, v + \".npy\") for k,\
+          \ v in storage_paths.items()}\n    model_save_path = os.path.join(local_tmp_dir,\
+          \ \"detect-digits\")\n    model_upload_prefix = \"models/detect-digits/1\"\
+          \n\n    # ===== Model Definition =====\n    print(\"Creating CNN model for\
+          \ digit recognition...\")\n    model = keras.models.Sequential([\n     \
+          \   # Convolutional layer\n        keras.layers.Conv2D(\n            filters=64,\
+          \ \n            kernel_size=(3, 3),\n            activation='relu',\n  \
+          \          input_shape=(28, 28, 1)\n        ),\n        keras.layers.MaxPool2D(pool_size=(2,\
+          \ 2)),\n\n        # Flatten for dense layers\n        keras.layers.Flatten(),\n\
+          \n        # Dense layers\n        keras.layers.Dense(64, activation='relu'),\n\
+          \        keras.layers.Dense(32, activation='relu'),\n\n        # Output\
+          \ layer (10 classes for digits 0-9)\n        keras.layers.Dense(10, activation='softmax')\n\
+          \    ])\n\n    # Capture model summary\n    model_summary_lines = []\n \
+          \   model.summary(print_fn=lambda x: model_summary_lines.append(x))\n  \
+          \  model_summary_text = \"\\n\".join(model_summary_lines)\n    print(model_summary_text)\n\
+          \n    # Compile model\n    model.compile(\n        optimizer=optimizer,\n\
+          \        loss=\"sparse_categorical_crossentropy\",\n        metrics=['accuracy']\n\
+          \    )\n\n    # ===== Load Training Data =====\n    print(\"Loading training\
+          \ data from MinIO...\")\n    try:\n        # Load training data\n      \
+          \  print(f\"Fetching x_train from {MINIO_BUCKET}/{storage_paths['x_train']}\"\
+          )\n        minio_client.fget_object(MINIO_BUCKET, storage_paths[\"x_train\"\
+          ], local_paths[\"x_train\"])\n        x_train = np.load(local_paths[\"x_train\"\
+          ])\n\n        print(f\"Fetching y_train from {MINIO_BUCKET}/{storage_paths['y_train']}\"\
+          )\n        minio_client.fget_object(MINIO_BUCKET, storage_paths[\"y_train\"\
+          ], local_paths[\"y_train\"])\n        y_train = np.load(local_paths[\"y_train\"\
+          ])\n\n        print(f\"Loaded x_train shape: {x_train.shape}, y_train shape:\
+          \ {y_train.shape}\")\n    except Exception as e:\n        print(f\"Error\
+          \ loading training data: {e}\")\n        raise\n\n    # ===== Start MLflow\
+          \ Run =====\n    with mlflow.start_run(experiment_id=experiment_id) as run:\n\
+          \        mlflow_run_id = run.info.run_id\n        print(f\"Started MLflow\
+          \ run: {mlflow_run_id}\")\n\n        # Log model parameters\n        mlflow.log_params({\n\
+          \            \"epochs\": no_epochs,\n            \"optimizer\": optimizer,\n\
+          \            \"model_type\": \"CNN\",\n            \"input_shape\": str((28,\
+          \ 28, 1)),\n            \"output_classes\": 10,\n            \"conv_filters\"\
+          : 64,\n            \"dense_units\": \"64,32,10\",\n            \"batch_size\"\
+          : 20,\n            \"activation\": \"relu,relu,softmax\"\n        })\n\n\
+          \        # Log model architecture\n        mlflow.log_text(model_summary_text,\
+          \ \"model_architecture.txt\")\n\n        # ===== Train Model =====\n   \
+          \     print(f\"Training model for {no_epochs} epochs...\")\n        try:\n\
+          \            history = model.fit(\n                x=x_train,\n        \
+          \        y=y_train,\n                epochs=no_epochs,\n               \
+          \ batch_size=20,\n                verbose=2  # Show progress for each epoch\n\
+          \            )\n            print(\"Training completed successfully\")\n\
+          \n            # Log training history\n            for epoch, (loss, acc)\
+          \ in enumerate(zip(\n                history.history['loss'], \n       \
+          \         history.history['accuracy']\n            )):\n               \
+          \ mlflow.log_metrics({\n                    \"train_loss\": loss,\n    \
+          \                \"train_accuracy\": acc\n                }, step=epoch)\n\
+          \n        except Exception as e:\n            print(f\"Error during model\
+          \ training: {e}\")\n            raise\n\n        # ===== Load Test Data\
+          \ for Evaluation =====\n        print(\"Loading test data for evaluation...\"\
+          )\n        try:\n            # Load test data\n            print(f\"Fetching\
+          \ x_test from {MINIO_BUCKET}/{storage_paths['x_test']}\")\n            minio_client.fget_object(MINIO_BUCKET,\
+          \ storage_paths[\"x_test\"], local_paths[\"x_test\"])\n            x_test\
+          \ = np.load(local_paths[\"x_test\"])\n\n            print(f\"Fetching y_test\
+          \ from {MINIO_BUCKET}/{storage_paths['y_test']}\")\n            minio_client.fget_object(MINIO_BUCKET,\
+          \ storage_paths[\"y_test\"], local_paths[\"y_test\"])\n            y_test\
+          \ = np.load(local_paths[\"y_test\"])\n\n            print(f\"Loaded x_test\
+          \ shape: {x_test.shape}, y_test shape: {y_test.shape}\")\n        except\
+          \ Exception as e:\n            print(f\"Error loading test data: {e}\")\n\
+          \            raise\n\n        # ===== Evaluate Model =====\n        print(\"\
+          Evaluating model on test data...\")\n        test_loss, test_accuracy =\
+          \ model.evaluate(x=x_test, y=y_test, verbose=0)\n        print(f\"Test accuracy:\
+          \ {test_accuracy:.4f}, Test loss: {test_loss:.4f}\")\n\n        # Log test\
+          \ metrics to MLflow\n        mlflow.log_metrics({\n            \"test_accuracy\"\
+          : test_accuracy,\n            \"test_loss\": test_loss\n        })\n\n \
+          \       # ===== Generate Confusion Matrix =====\n        print(\"Generating\
+          \ confusion matrix...\")\n        test_predictions = model.predict(x=x_test)\n\
+          \        predicted_classes = np.argmax(test_predictions, axis=1)\n\n   \
+          \     confusion_matrix = tf.math.confusion_matrix(\n            labels=y_test,\
+          \ \n            predictions=predicted_classes\n        ).numpy()\n\n   \
+          \     # Format confusion matrix for visualization\n        labels = list(map(str,\
+          \ range(10)))  # 0-9 digits\n        confusion_data = []\n\n        for\
+          \ true_idx, row in enumerate(confusion_matrix):\n            for pred_idx,\
+          \ count in enumerate(row):\n                confusion_data.append((labels[true_idx],\
+          \ labels[pred_idx], int(count)))\n\n        df_confusion = pd.DataFrame(\n\
+          \            confusion_data, \n            columns=['target', 'predicted',\
+          \ 'count']\n        )\n\n        # Save confusion matrix for MLflow\n  \
+          \      cm_file_path = os.path.join(local_tmp_dir, \"confusion_matrix.csv\"\
+          )\n        df_confusion.to_csv(cm_file_path, index=False)\n        mlflow.log_artifact(cm_file_path,\
+          \ \"confusion_matrix\")\n\n        # Format confusion matrix for KFP UI\n\
+          \        cm_csv = df_confusion.to_csv(header=False, index=False)\n\n   \
+          \     # ===== Save Model =====\n        print(f\"Saving model to {model_save_path}...\"\
+          )\n        if os.path.exists(model_save_path):\n            shutil.rmtree(model_save_path)\n\
+          \n        os.makedirs(model_save_path)\n        keras.models.save_model(model,\
+          \ model_save_path)\n\n        # Log model to MLflow\n        mlflow.tensorflow.log_model(\n\
+          \            model, \n            artifact_path=\"model\",\n           \
+          \ registered_model_name=\"digits-recognizer-model\"\n        )\n       \
+          \ print(\"Model saved and logged to MLflow\")\n\n        # ===== Upload\
+          \ Model to MinIO =====\n        print(f\"Uploading model to MinIO: {MINIO_BUCKET}/{model_upload_prefix}\"\
+          )\n\n        # Helper function to upload directory recursively\n       \
+          \ def upload_directory_to_minio(local_dir, bucket, prefix):\n          \
+          \  \"\"\"Upload directory contents recursively to MinIO\"\"\"\n        \
+          \    for root, _, files in os.walk(local_dir):\n                for file\
+          \ in files:\n                    # Get full path\n                    local_file_path\
+          \ = os.path.join(root, file)\n\n                    # Get relative path\
+          \ from the source directory\n                    rel_path = os.path.relpath(local_file_path,\
+          \ local_dir)\n\n                    # Construct MinIO object path with normalized\
+          \ separators\n                    minio_key = f\"{prefix}/{rel_path}\".replace(\"\
+          \\\\\", \"/\")\n\n                    print(f\"  Uploading: {local_file_path}\
+          \ \u2192 {bucket}/{minio_key}\")\n                    try:\n           \
+          \             minio_client.fput_object(bucket, minio_key, local_file_path)\n\
+          \                    except Exception as e:\n                        print(f\"\
+          \  Error uploading {local_file_path}: {e}\")\n                        raise\n\
+          \n        try:\n            upload_directory_to_minio(model_save_path, MINIO_BUCKET,\
+          \ model_upload_prefix)\n            print(\"Model successfully uploaded\
+          \ to MinIO\")\n        except Exception as e:\n            print(f\"Error\
+          \ uploading model to MinIO: {e}\")\n            raise\n\n        # =====\
+          \ Prepare KFP UI Outputs =====\n\n        # Combined view: confusion matrix\
+          \ + markdown report\n        model_view_json = {\n            \"outputs\"\
+          : [\n                # Confusion matrix visualization\n                {\n\
+          \                    \"type\": \"confusion_matrix\",\n                 \
+          \   \"format\": \"csv\",\n                    \"schema\": [\n          \
+          \              {'name': 'target', 'type': 'CATEGORY'},\n               \
+          \         {'name': 'predicted', 'type': 'CATEGORY'},\n                 \
+          \       {'name': 'count', 'type': 'NUMBER'},\n                    ],\n \
+          \                   \"source\": cm_csv,\n                    \"storage\"\
+          : \"inline\",\n                    \"labels\": labels\n                },\n\
+          \                # Markdown report\n                {\n                \
+          \    'storage': 'inline',\n                    'source': f'''# Model Training\
+          \ & Evaluation Report\n\n## Training Configuration\n* **Epochs:** {no_epochs}\n\
+          * **Optimizer:** {optimizer}\n* **Batch Size:** 20\n* **Loss Function:**\
+          \ sparse_categorical_crossentropy\n\n## MLflow Tracking\n* **Experiment:**\
+          \ {experiment_name}\n* **Run ID:** {mlflow_run_id}\n* **Tracking Server:**\
+          \ {MLFLOW_TRACKING_URI}\n\n## Model Architecture\n```\n{model_summary_text}\n\
+          ```\n\n## Evaluation on Test Set\n* **Accuracy:** {test_accuracy:.4f}\n\
+          * **Loss:** {test_loss:.4f}\n\n## Model Storage\n* **MinIO Path:** {MINIO_BUCKET}/{model_upload_prefix}\n\
+          * **Registered in MLflow:** Yes (as \"digits-recognizer-model\")\n''',\n\
+          \                    'type': 'markdown',\n                }\n          \
+          \  ]\n        }\n\n        # Metrics for KFP UI\n        metrics_json =\
+          \ {\n            'metrics': [\n                {\n                    'name':\
+          \ 'model-accuracy',\n                    'numberValue': float(test_accuracy),\n\
+          \                    'format': \"PERCENTAGE\"\n                },\n    \
+          \            {\n                    'name': 'model-loss',\n            \
+          \        'numberValue': float(test_loss),\n                    'format':\
+          \ \"RAW\"\n                }\n            ]\n        }\n\n    # ===== Clean\
+          \ Up =====\n    print(\"Cleaning up temporary files...\")\n    for path\
+          \ in local_paths.values():\n        if os.path.exists(path):\n         \
+          \   os.remove(path)\n\n    if os.path.exists(model_save_path):\n       \
+          \ shutil.rmtree(model_save_path)\n\n    if os.path.exists(cm_file_path):\n\
+          \        os.remove(cm_file_path)\n\n    return (\n        json.dumps(model_view_json),\n\
+          \        json.dumps(metrics_json),\n        float(test_accuracy),\n    \
+          \    float(test_loss),\n        mlflow_run_id\n    )\n\n"
+        image: public.ecr.aws/j1r0q0g6/notebooks/notebook-servers/jupyter-tensorflow-full:v1.5.0
+    exec-model-serving:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - model_serving
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.7.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"'  &&\
+          \  python3 -m pip install --quiet --no-warn-script-location 'kserve==0.8.0.1'\
+          \ && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef model_serving() -> str:\n    \"\"\"\n    Create a KServe InferenceService\
+          \ for the trained model.\n\n    This component:\n    - Configures Kubernetes\
+          \ client for the current environment\n    - Creates a KServe InferenceService\
+          \ definition with appropriate settings\n    - Deploys the service to make\
+          \ the model available for inference\n\n    Returns:\n        The name of\
+          \ the created KServe InferenceService\n    \"\"\"\n    import os\n    from\
+          \ datetime import datetime\n    from kubernetes import client, config\n\
+          \    from kserve import KServeClient\n    from kserve import constants\n\
+          \    from kserve import utils\n    from kserve import V1beta1InferenceService\n\
+          \    from kserve import V1beta1InferenceServiceSpec\n    from kserve import\
+          \ V1beta1PredictorSpec\n    from kserve import V1beta1TFServingSpec\n\n\
+          \    print(\"Setting up model serving with KServe...\")\n\n    # ===== Kubernetes\
+          \ Configuration =====\n    try:\n        # Try in-cluster config first (when\
+          \ running in Kubeflow)\n        config.load_incluster_config()\n       \
+          \ print(\"Using in-cluster Kubernetes configuration\")\n    except config.ConfigException:\n\
+          \        try:\n            # Fall back to local kubeconfig\n           \
+          \ config.load_kube_config()\n            print(\"Using local Kubernetes\
+          \ configuration (kubeconfig)\")\n        except config.ConfigException as\
+          \ e:\n            print(f\"ERROR: Could not configure Kubernetes client:\
+          \ {e}\")\n            raise\n\n    # ===== Determine Namespace =====\n \
+          \   namespace = utils.get_default_target_namespace()\n    if not namespace:\n\
+          \        # Try to get namespace from service account\n        sa_namespace_path\
+          \ = '/var/run/secrets/kubernetes.io/serviceaccount/namespace'\n        try:\n\
+          \            with open(sa_namespace_path, 'r') as f:\n                namespace\
+          \ = f.read().strip()\n            print(f\"Using namespace from service\
+          \ account: {namespace}\")\n        except FileNotFoundError:\n         \
+          \   namespace = 'kubeflow'  # Default namespace\n            print(f\"Using\
+          \ default namespace: {namespace}\")\n\n    # ===== Service Configuration\
+          \ =====\n    minio_bucket = os.environ.get('MINIO_BUCKET', 'mlpipeline')\n\
+          \    storage_uri = f\"s3://{minio_bucket}/models/detect-digits\"\n    service_account\
+          \ = os.environ.get('KSERVE_SA_NAME', \"sa-minio-kserve\")\n\n    # Generate\
+          \ unique service name with timestamp\n    timestamp = datetime.now().strftime(\"\
+          %Y%m%d-%H%M%S\")\n    service_name = f'digits-recognizer-{timestamp}'\n\n\
+          \    kserve_version = 'v1beta1'\n    api_version = f\"{constants.KSERVE_GROUP}/{kserve_version}\"\
+          \n\n    print(f\"Creating KServe InferenceService '{service_name}'\")\n\
+          \    print(f\"Model storage URI: {storage_uri}\")\n    print(f\"Service\
+          \ account: {service_account}\")\n    print(f\"Namespace: {namespace}\")\n\
+          \n    # ===== Create InferenceService Definition =====\n    isvc = V1beta1InferenceService(\n\
+          \        api_version=api_version,\n        kind=constants.KSERVE_KIND,\n\
+          \        metadata=client.V1ObjectMeta(\n            name=service_name,\n\
+          \            namespace=namespace,\n            annotations={\"sidecar.istio.io/inject\"\
+          : \"false\"}\n        ),\n        spec=V1beta1InferenceServiceSpec(\n  \
+          \          predictor=V1beta1PredictorSpec(\n                service_account_name=service_account,\n\
+          \                tensorflow=V1beta1TFServingSpec(\n                    storage_uri=storage_uri,\n\
+          \                )\n            )\n        )\n    )\n\n    # ===== Deploy\
+          \ Service =====\n    kserve_client = KServeClient()\n    try:\n        print(\"\
+          Creating KServe InferenceService...\")\n        kserve_client.create(isvc,\
+          \ namespace=namespace)\n        print(f\"Successfully created InferenceService:\
+          \ {service_name}\")\n    except Exception as e:\n        print(f\"ERROR\
+          \ creating InferenceService: {e}\")\n        try:\n            # Try to\
+          \ get status of potentially partially created service\n            status\
+          \ = kserve_client.get(service_name, namespace=namespace)\n            print(f\"\
+          Current status: {status}\")\n        except Exception as get_e:\n      \
+          \      print(f\"Could not get status: {get_e}\")\n        raise\n\n    return\
+          \ service_name\n\n"
+        image: public.ecr.aws/j1r0q0g6/notebooks/notebook-servers/jupyter-tensorflow-full:v1.5.0
+    exec-reshape-data:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - reshape_data
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.7.0'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef reshape_data() -> NamedTuple(\"Outputs\", [(\"reshape_summary\"\
+          , Markdown)]): \n    \"\"\"\n    Reshape and normalize MNIST data for model\
+          \ training.\n\n    - Reshapes data to add channel dimension (28x28x1)\n\
+          \    - Normalizes pixel values to [0,1] range\n    - Saves processed data\
+          \ back to MinIO\n\n    Returns:\n        NamedTuple containing summary of\
+          \ the preprocessing steps.\n    \"\"\"\n    import json\n    import os\n\
+          \    import numpy as np\n    from minio import Minio\n\n    print(\"Reshaping\
+          \ and normalizing MNIST data...\")\n\n    # MinIO configuration - make sure\
+          \ these match your actual values\n    # IMPORTANT: These must match the\
+          \ values used in get_data_batch\n    MINIO_ENDPOINT = \"localhost:9000\"\
+          \n    MINIO_ACCESS_KEY = \"minio\"\n    MINIO_SECRET_KEY = \"minioadmin\"\
+          \n    MINIO_BUCKET = \"mlpipeline\"\n    MINIO_SECURE = False\n\n    # Debug\
+          \ output\n    print(\"Setting up MinIO connection...\")\n    print(f\"MinIO\
+          \ endpoint: {MINIO_ENDPOINT}\")\n    print(f\"MinIO access key: {MINIO_ACCESS_KEY}\"\
+          )\n    print(f\"MinIO bucket: {MINIO_BUCKET}\")\n    print(f\"MinIO secure:\
+          \ {MINIO_SECURE}\")\n\n    local_tmp_dir = \"/tmp\"\n\n    # Define paths\n\
+          \    minio_paths = {\n        \"x_train\": \"x_train\",\n        \"x_test\"\
+          : \"x_test\"\n    }\n\n    local_paths = {k: os.path.join(local_tmp_dir,\
+          \ v + \".npy\") for k, v in minio_paths.items()}\n\n    # Create MinIO client\n\
+          \    try:\n        minio_client = Minio(\n            MINIO_ENDPOINT,\n\
+          \            access_key=MINIO_ACCESS_KEY,\n            secret_key=MINIO_SECRET_KEY,\n\
+          \            secure=MINIO_SECURE\n        )\n\n        # Check if bucket\
+          \ exists\n        if not minio_client.bucket_exists(MINIO_BUCKET):\n   \
+          \         print(f\"Error: Bucket {MINIO_BUCKET} does not exist\")\n    \
+          \        raise ValueError(f\"Bucket {MINIO_BUCKET} not found\")\n      \
+          \  else:\n            print(f\"Successfully connected to bucket: {MINIO_BUCKET}\"\
+          )\n    except Exception as e:\n        print(f\"Error connecting to MinIO:\
+          \ {e}\")\n        raise\n\n    # Load and process data\n    x_train_shape,\
+          \ x_test_shape = None, None\n\n    try:\n        # Process training data\n\
+          \        print(f\"Loading training data from {MINIO_BUCKET}/{minio_paths['x_train']}\"\
+          )\n        minio_client.fget_object(MINIO_BUCKET, minio_paths[\"x_train\"\
+          ], local_paths[\"x_train\"])\n        x_train = np.load(local_paths[\"x_train\"\
+          ])\n        print(f\"Original x_train shape: {x_train.shape}\")\n      \
+          \  x_train_shape = x_train.shape\n\n        # Reshape and normalize\n  \
+          \      x_train = x_train.reshape(-1, 28, 28, 1)\n        x_train = x_train\
+          \ / 255.0\n        print(f\"Processed x_train shape: {x_train.shape}\")\n\
+          \n        # Save back to MinIO\n        np.save(local_paths[\"x_train\"\
+          ], x_train)\n        print(f\"Uploading processed training data back to\
+          \ MinIO\")\n        minio_client.fput_object(MINIO_BUCKET, minio_paths[\"\
+          x_train\"], local_paths[\"x_train\"])\n        print(\"Training data successfully\
+          \ processed and uploaded\")\n\n        # Process test data\n        print(f\"\
+          Loading test data from {MINIO_BUCKET}/{minio_paths['x_test']}\")\n     \
+          \   minio_client.fget_object(MINIO_BUCKET, minio_paths[\"x_test\"], local_paths[\"\
+          x_test\"])\n        x_test = np.load(local_paths[\"x_test\"])\n        print(f\"\
+          Original x_test shape: {x_test.shape}\")\n        x_test_shape = x_test.shape\n\
+          \n        # Reshape and normalize\n        x_test = x_test.reshape(-1, 28,\
+          \ 28, 1)\n        x_test = x_test / 255.0\n        print(f\"Processed x_test\
+          \ shape: {x_test.shape}\")\n\n        # Save back to MinIO\n        np.save(local_paths[\"\
+          x_test\"], x_test)\n        print(f\"Uploading processed test data back\
+          \ to MinIO\")\n        minio_client.fput_object(MINIO_BUCKET, minio_paths[\"\
+          x_test\"], local_paths[\"x_test\"])\n        print(\"Test data successfully\
+          \ processed and uploaded\")\n\n    except Exception as e:\n        print(f\"\
+          Error processing data: {e}\")\n        raise\n    finally:\n        # Clean\
+          \ up local files\n        for path in local_paths.values():\n          \
+          \  if os.path.exists(path):\n                os.remove(path)\n         \
+          \       print(f\"Removed temporary file: {path}\")\n\n    # Create markdown\
+          \ summary\n    markdown_summary = f\"\"\"\n# Data Preprocessing Summary\n\
+          \n## Preprocessing Steps:\n1. **Reshaping:** Added channel dimension for\
+          \ CNN input\n   * Training data: {x_train_shape} \u2192 {(-1, 28, 28, 1)}\n\
+          \   * Test data: {x_test_shape} \u2192 {(-1, 28, 28, 1)}\n2. **Normalization:**\
+          \ Scaled pixel values from [0,255] to [0,1]\n   * Divided all pixel values\
+          \ by 255.0\n\n## Storage:\n* Processed data saved back to MinIO bucket:\
+          \ `{MINIO_BUCKET}`\n* Original paths were preserved: `{\", \".join(minio_paths.values())}`\n\
+          \"\"\"\n\n    markdown_artifact_json = {\n        'outputs': [{\n      \
+          \      'type': 'markdown',\n            'storage': 'inline',\n         \
+          \   'source': markdown_summary\n        }]\n    }\n\n    return (json.dumps(markdown_artifact_json),)\n\
+          \n"
+        image: public.ecr.aws/j1r0q0g6/notebooks/notebook-servers/jupyter-tensorflow-full:v1.5.0
+pipelineInfo:
+  description: MNIST digit recognition pipeline with MLflow integration
+  name: digits-recognizer-mlflow-pipeline
+root:
+  dag:
+    outputs:
+      artifacts:
+        model-building-with-mlflow-model_metrics:
+          artifactSelectors:
+          - outputArtifactKey: model_metrics
+            producerSubtask: model-building-with-mlflow
+    tasks:
+      get-data-batch:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-get-data-batch
+        taskInfo:
+          name: get-data-batch
+      get-latest-data:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-get-latest-data
+        dependentTasks:
+        - get-data-batch
+        taskInfo:
+          name: get-latest-data
+      model-building-with-mlflow:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-model-building-with-mlflow
+        dependentTasks:
+        - reshape-data
+        inputs:
+          parameters:
+            experiment_name:
+              componentInputParameter: mlflow_experiment
+            no_epochs:
+              componentInputParameter: no_epochs
+            optimizer:
+              componentInputParameter: optimizer
+        taskInfo:
+          name: model-building-with-mlflow
+      model-serving:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-model-serving
+        dependentTasks:
+        - model-building-with-mlflow
+        taskInfo:
+          name: model-serving
+      reshape-data:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-reshape-data
+        dependentTasks:
+        - get-data-batch
+        taskInfo:
+          name: reshape-data
+  inputDefinitions:
+    parameters:
+      mlflow_experiment:
+        defaultValue: digits-recognizer-kfp
+        description: MLflow experiment name for tracking
+        isOptional: true
+        parameterType: STRING
+      no_epochs:
+        defaultValue: 3.0
+        description: Number of training epochs
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      optimizer:
+        defaultValue: adam
+        description: Optimizer to use for training
+        isOptional: true
+        parameterType: STRING
+  outputDefinitions:
+    artifacts:
+      model-building-with-mlflow-model_metrics:
+        artifactType:
+          schemaTitle: system.Metrics
+          schemaVersion: 0.0.1
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.7.0

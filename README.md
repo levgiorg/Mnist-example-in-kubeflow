@@ -25,7 +25,7 @@ digits_recognition_pipeline/
 ├── notebooks/
 │   └── MNIST Digit Recognition.ipynb  # Demo notebook
 ├── pipeline.py               # Pipeline definition
-├── main.py                    # Pipeline execution script
+├── run.py                    # Pipeline execution script
 ├── requirements.txt          # Project dependencies
 └── README.md                 # This file
 ```
@@ -58,17 +58,17 @@ digits_recognition_pipeline/
 
 ### Running the Pipeline
 
-You can run the pipeline using the included `main.py` script:
+You can run the pipeline using the included `run.py` script:
 
 ```bash
 # Run with default parameters
-python main.py
+python run.py
 
 # Compile only (without submitting)
-python main.py --compile-only
+python run.py --compile-only
 
 # Customize parameters
-python main.py --epochs 5 --optimizer adam --experiment my-experiment
+python run.py --epochs 5 --optimizer adam --experiment my-experiment
 ```
 
 ### Pipeline Parameters

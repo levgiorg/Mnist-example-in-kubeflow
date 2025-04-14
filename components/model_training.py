@@ -61,26 +61,41 @@ def model_building_with_mlflow(
 
     print(f"Building model with: epochs={no_epochs}, optimizer={optimizer}")
     
+    # ===== Hard-coded configuration =====
+    # MinIO configuration - make sure these match your actual values
+    MINIO_ENDPOINT = "localhost:9000"
+    MINIO_ACCESS_KEY = "minio"
+    MINIO_SECRET_KEY = "minioadmin"
+    MINIO_BUCKET = "mlpipeline"
+    MINIO_SECURE = False
+    
+    # MLflow configuration
+    MLFLOW_TRACKING_URI = "http://mlflow-server.kubeflow.svc.cluster.local:5000"
+    MLFLOW_S3_ENDPOINT_URL = f"http://{MINIO_ENDPOINT}"
+    MLFLOW_BUCKET = "mlflow"
+    
+    # Debug output
+    print("=== Configuration ===")
+    print(f"MinIO endpoint: {MINIO_ENDPOINT}")
+    print(f"MinIO access key: {MINIO_ACCESS_KEY}")
+    print(f"MinIO bucket: {MINIO_BUCKET}")
+    print(f"MLflow tracking URI: {MLFLOW_TRACKING_URI}")
+    print(f"MLflow S3 endpoint: {MLFLOW_S3_ENDPOINT_URL}")
+    print(f"MLflow experiment: {experiment_name}")
+    
     # ===== MLflow Setup =====
     # Configure environment variables
-    os.environ["MLFLOW_TRACKING_URI"] = os.environ.get(
-        "MLFLOW_TRACKING_URI", "http://mlflow-server.kubeflow.svc.cluster.local:5000"
-    )
-    os.environ["MLFLOW_S3_ENDPOINT_URL"] = os.environ.get(
-        "MLFLOW_S3_ENDPOINT_URL", "http://localhost:9000"
-    )
-    os.environ["AWS_ACCESS_KEY_ID"] = os.environ.get("AWS_ACCESS_KEY_ID", "minio")
-    os.environ["AWS_SECRET_ACCESS_KEY"] = os.environ.get(
-        "AWS_SECRET_ACCESS_KEY", "your-secret-key"
-    )
+    os.environ["MLFLOW_TRACKING_URI"] = MLFLOW_TRACKING_URI
+    os.environ["MLFLOW_S3_ENDPOINT_URL"] = MLFLOW_S3_ENDPOINT_URL
+    os.environ["AWS_ACCESS_KEY_ID"] = MINIO_ACCESS_KEY
+    os.environ["AWS_SECRET_ACCESS_KEY"] = MINIO_SECRET_KEY
     
     # Ensure MLflow bucket exists
-    default_bucket_name = "mlflow"
     s3_client = boto3.client(
         "s3",
-        endpoint_url=os.environ["MLFLOW_S3_ENDPOINT_URL"],
-        aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
-        aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+        endpoint_url=MLFLOW_S3_ENDPOINT_URL,
+        aws_access_key_id=MINIO_ACCESS_KEY,
+        aws_secret_access_key=MINIO_SECRET_KEY,
         config=boto3.session.Config(signature_version="s3v4"),
     )
     
@@ -88,14 +103,17 @@ def model_building_with_mlflow(
         buckets_response = s3_client.list_buckets()
         existing_buckets = [bucket["Name"] for bucket in buckets_response["Buckets"]]
         
-        if default_bucket_name not in existing_buckets:
-            print(f"Creating MLflow bucket: {default_bucket_name}")
-            s3_client.create_bucket(Bucket=default_bucket_name)
+        if MLFLOW_BUCKET not in existing_buckets:
+            print(f"Creating MLflow bucket: {MLFLOW_BUCKET}")
+            s3_client.create_bucket(Bucket=MLFLOW_BUCKET)
+        else:
+            print(f"MLflow bucket '{MLFLOW_BUCKET}' already exists")
     except Exception as e:
         print(f"Warning: MLflow bucket check failed: {e}")
     
     # Create or get MLflow experiment
     try:
+        mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
         experiment = mlflow.get_experiment_by_name(experiment_name)
         if experiment is None:
             experiment_id = mlflow.create_experiment(experiment_name)
@@ -107,14 +125,25 @@ def model_building_with_mlflow(
         print(f"MLflow experiment setup issue: {e}")
         experiment_id = None
     
-    # ===== Data Loading Setup =====
-    minio_client = Minio(
-        "localhost:9000",
-        access_key="minio",
-        secret_key="your-secret-key",
-        secure=False
-    )
-    minio_bucket = "mlpipeline"
+    # ===== MinIO Client Setup =====
+    try:
+        minio_client = Minio(
+            MINIO_ENDPOINT,
+            access_key=MINIO_ACCESS_KEY,
+            secret_key=MINIO_SECRET_KEY,
+            secure=MINIO_SECURE
+        )
+        
+        if not minio_client.bucket_exists(MINIO_BUCKET):
+            print(f"Error: Bucket {MINIO_BUCKET} does not exist")
+            raise ValueError(f"Bucket {MINIO_BUCKET} not found")
+        else:
+            print(f"Successfully connected to bucket: {MINIO_BUCKET}")
+    except Exception as e:
+        print(f"Error connecting to MinIO: {e}")
+        raise
+    
+    # ===== Define paths =====
     local_tmp_dir = "/tmp"
     
     # Define storage paths
@@ -169,10 +198,12 @@ def model_building_with_mlflow(
     print("Loading training data from MinIO...")
     try:
         # Load training data
-        minio_client.fget_object(minio_bucket, storage_paths["x_train"], local_paths["x_train"])
+        print(f"Fetching x_train from {MINIO_BUCKET}/{storage_paths['x_train']}")
+        minio_client.fget_object(MINIO_BUCKET, storage_paths["x_train"], local_paths["x_train"])
         x_train = np.load(local_paths["x_train"])
         
-        minio_client.fget_object(minio_bucket, storage_paths["y_train"], local_paths["y_train"])
+        print(f"Fetching y_train from {MINIO_BUCKET}/{storage_paths['y_train']}")
+        minio_client.fget_object(MINIO_BUCKET, storage_paths["y_train"], local_paths["y_train"])
         y_train = np.load(local_paths["y_train"])
         
         print(f"Loaded x_train shape: {x_train.shape}, y_train shape: {y_train.shape}")
@@ -231,10 +262,12 @@ def model_building_with_mlflow(
         print("Loading test data for evaluation...")
         try:
             # Load test data
-            minio_client.fget_object(minio_bucket, storage_paths["x_test"], local_paths["x_test"])
+            print(f"Fetching x_test from {MINIO_BUCKET}/{storage_paths['x_test']}")
+            minio_client.fget_object(MINIO_BUCKET, storage_paths["x_test"], local_paths["x_test"])
             x_test = np.load(local_paths["x_test"])
             
-            minio_client.fget_object(minio_bucket, storage_paths["y_test"], local_paths["y_test"])
+            print(f"Fetching y_test from {MINIO_BUCKET}/{storage_paths['y_test']}")
+            minio_client.fget_object(MINIO_BUCKET, storage_paths["y_test"], local_paths["y_test"])
             y_test = np.load(local_paths["y_test"])
             
             print(f"Loaded x_test shape: {x_test.shape}, y_test shape: {y_test.shape}")
@@ -301,7 +334,7 @@ def model_building_with_mlflow(
         print("Model saved and logged to MLflow")
         
         # ===== Upload Model to MinIO =====
-        print(f"Uploading model to MinIO: {minio_bucket}/{model_upload_prefix}")
+        print(f"Uploading model to MinIO: {MINIO_BUCKET}/{model_upload_prefix}")
         
         # Helper function to upload directory recursively
         def upload_directory_to_minio(local_dir, bucket, prefix):
@@ -325,7 +358,7 @@ def model_building_with_mlflow(
                         raise
         
         try:
-            upload_directory_to_minio(model_save_path, minio_bucket, model_upload_prefix)
+            upload_directory_to_minio(model_save_path, MINIO_BUCKET, model_upload_prefix)
             print("Model successfully uploaded to MinIO")
         except Exception as e:
             print(f"Error uploading model to MinIO: {e}")
@@ -363,7 +396,7 @@ def model_building_with_mlflow(
 ## MLflow Tracking
 * **Experiment:** {experiment_name}
 * **Run ID:** {mlflow_run_id}
-* **Tracking Server:** {os.environ["MLFLOW_TRACKING_URI"]}
+* **Tracking Server:** {MLFLOW_TRACKING_URI}
 
 ## Model Architecture
 ```
@@ -375,7 +408,7 @@ def model_building_with_mlflow(
 * **Loss:** {test_loss:.4f}
 
 ## Model Storage
-* **MinIO Path:** {minio_bucket}/{model_upload_prefix}
+* **MinIO Path:** {MINIO_BUCKET}/{model_upload_prefix}
 * **Registered in MLflow:** Yes (as "digits-recognizer-model")
 ''',
                     'type': 'markdown',
