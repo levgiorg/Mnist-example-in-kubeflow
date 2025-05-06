@@ -165,5 +165,13 @@ Edit `pipeline.py` to change the pipeline structure or add new components.
 ## Acknowledgments
 
 - TensorFlow and Keras for the ML framework
-- Kubeflow team for the pipeline orchestration
-- MLflow team for experiment tracking
+- Kubeflow for the pipeline orchestration
+- MLflow for experiment tracking
+
+## License
+
+Copyright © 2025, Fourdotinfinity
+
+## Developers
+
+George Levis
