@@ -61,18 +61,17 @@ def model_building_with_mlflow(
 
     print(f"Building model with: epochs={no_epochs}, optimizer={optimizer}")
     
-    # ===== Hard-coded configuration =====
-    # MinIO configuration - make sure these match your actual values
-    MINIO_ENDPOINT = "localhost:9000"
-    MINIO_ACCESS_KEY = "minio"
-    MINIO_SECRET_KEY = "minioadmin"
-    MINIO_BUCKET = "mlpipeline"
-    MINIO_SECURE = False
+    # ===== Configuration from environment variables =====
+    MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "localhost:9000")
+    MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "minioadmin")
+    MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "minioadmin")
+    MINIO_BUCKET = os.environ.get("MINIO_BUCKET", "mlpipeline")
+    MINIO_SECURE = os.environ.get("MINIO_SECURE", "false").lower() == "true"
     
     # MLflow configuration
-    MLFLOW_TRACKING_URI = "http://mlflow-server.kubeflow.svc.cluster.local:5000"
+    MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000")
     MLFLOW_S3_ENDPOINT_URL = f"http://{MINIO_ENDPOINT}"
-    MLFLOW_BUCKET = "mlflow"
+    MLFLOW_BUCKET = os.environ.get("MLFLOW_BUCKET", "mlflow")
     
     # Debug output
     print("=== Configuration ===")

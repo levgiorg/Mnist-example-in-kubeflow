@@ -8,7 +8,7 @@ import os
 
 # MinIO configuration
 MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "localhost:9000")
-MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "minio")
+MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "minioadmin")
 MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "minioadmin")
 MINIO_BUCKET = os.environ.get("MINIO_BUCKET", "mlpipeline")
 MINIO_SECURE = os.environ.get("MINIO_SECURE", "false").lower() == "true"

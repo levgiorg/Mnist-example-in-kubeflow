@@ -1,177 +1,249 @@
-# MNIST Digit Recognition Pipeline
+# MNIST MLOps Pipeline
 
-A complete ML pipeline for digit recognition using Kubeflow Pipelines and MLflow integration.
+**Production-ready ML pipeline for digit recognition using Kubeflow Pipelines, MLflow, and KServe**
 
-## Overview
+[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://python.org)
+[![Kubeflow](https://img.shields.io/badge/Kubeflow-1.8+-orange.svg)](https://kubeflow.org)
+[![MLflow](https://img.shields.io/badge/MLflow-2.0+-green.svg)](https://mlflow.org)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-This project implements an end-to-end machine learning pipeline for MNIST digit recognition using Kubeflow Pipelines and MLflow for experiment tracking. The pipeline includes data acquisition, preprocessing, model training, and model serving, all orchestrated in a modular, maintainable codebase.
+## 🚀 Overview
 
-## Project Structure
+This project demonstrates a complete MLOps pipeline implementation for MNIST digit recognition, showcasing modern ML engineering practices with enterprise-grade tooling. The pipeline orchestrates data ingestion, model training, experiment tracking, and model serving in a cloud-native, scalable architecture.
+
+### Key Features
+
+- **🔄 End-to-end MLOps Pipeline**: Automated workflow from data acquisition to model serving
+- **📊 Experiment Tracking**: Comprehensive MLflow integration for reproducible experiments
+- **🎯 Model Serving**: Production-ready deployment with KServe inference service
+- **📦 Containerized Components**: Cloud-native approach with Docker and Kubernetes
+- **🔧 Infrastructure as Code**: Declarative pipeline definitions with Kubeflow DSL
+- **🏗️ Modular Architecture**: Reusable components for scalable ML workflows
+
+## 🏗️ Architecture
 
 ```
-digits_recognition_pipeline/
-├── config/
-│   └── settings.py           # Configuration settings
-├── components/
-│   ├── __init__.py
-│   ├── data_acquisition.py   # Data acquisition components
-│   ├── data_processing.py    # Data preprocessing components
-│   ├── model_training.py     # Model training components
-│   └── model_serving.py      # Model serving components
-├── utils/
-│   ├── __init__.py
-│   ├── minio_utils.py        # MinIO helper functions
-│   └── mlflow_utils.py       # MLflow helper functions
-├── notebooks/
-│   └── MNIST Digit Recognition.ipynb  # Demo notebook
-├── pipeline.py               # Pipeline definition
-├── run.py                    # Pipeline execution script
-├── requirements.txt          # Project dependencies
-└── README.md                 # This file
+┌─────────────────────────────────────────────────────────────────┐
+│                    MNIST MLOps Pipeline                        │
+├─────────────────────────────────────────────────────────────────┤
+│  Data Acquisition → Data Processing → Model Training → Serving  │
+│       ↓                    ↓               ↓            ↓       │
+│   MinIO Storage     Preprocessing     MLflow Tracking  KServe   │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-## Prerequisites
+### Project Structure
 
-- Kubeflow Pipelines 1.8+ installed and running
+```
+mnist-mlops-pipeline/
+├── 📁 components/              # Pipeline components
+│   ├── data_acquisition.py     # Data ingestion component
+│   ├── data_processing.py      # Data preprocessing component
+│   ├── model_training.py       # Model training with MLflow
+│   └── model_serving.py        # KServe deployment component
+├── 📁 config/                  # Configuration management
+│   └── settings.py             # Environment-based settings
+├── 📁 utils/                   # Utility modules
+│   ├── minio_utils.py          # Object storage operations
+│   └── mlflow_utils.py         # Experiment tracking utilities
+├── 📄 pipeline.py              # Main pipeline definition
+├── 📄 run.py                   # Pipeline execution script
+├── 📄 requirements.txt         # Python dependencies
+├── 📄 .env.example             # Environment variables template
+└── 📄 README.md                # This documentation
+```
+
+## 🛠️ Technology Stack
+
+| Component | Technology | Purpose |
+|-----------|------------|---------|
+| **Orchestration** | Kubeflow Pipelines | Workflow orchestration and pipeline management |
+| **Experiment Tracking** | MLflow | Model versioning, parameter tracking, and artifact storage |
+| **Model Serving** | KServe | Production model deployment and inference |
+| **Object Storage** | MinIO | Data and model artifact storage |
+| **ML Framework** | TensorFlow/Keras | Model development and training |
+| **Infrastructure** | Kubernetes | Container orchestration and scaling |
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Kubernetes cluster with Kubeflow Pipelines installed
 - MLflow tracking server deployed
-- MinIO or S3-compatible object storage
-- Kubernetes cluster with KServe (for model serving)
+- MinIO or S3-compatible storage
+- Python 3.8+
 
-## Installation
+### Installation
 
-1. Clone this repository:
-   ```
-   git clone https://github.com/yourusername/mnist-digit-recognition-pipeline.git
-   cd mnist-digit-recognition-pipeline
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/yourusername/mnist-mlops-pipeline.git
+   cd mnist-mlops-pipeline
    ```
 
-2. Install dependencies:
-   ```
+2. **Install dependencies**
+   ```bash
    pip install -r requirements.txt
    ```
 
-3. Configure environment:
-   - Update `config/settings.py` with your environment-specific settings
-   - Alternatively, set the corresponding environment variables
+3. **Configure environment**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your environment-specific values
+   ```
 
-## Usage
+4. **Run the pipeline**
+   ```bash
+   # Execute with default parameters
+   python run.py
+   
+   # Customize training parameters
+   python run.py --epochs 10 --optimizer adam --experiment production-run
+   ```
 
-### Running the Pipeline
-
-You can run the pipeline using the included `run.py` script:
-
-```bash
-# Run with default parameters
-python run.py
-
-# Compile only (without submitting)
-python run.py --compile-only
-
-# Customize parameters
-python run.py --epochs 5 --optimizer adam --experiment my-experiment
-```
-
-### Pipeline Parameters
-
-- `no_epochs`: Number of training epochs (default: 3)
-- `optimizer`: Optimizer to use for training (default: "adam")
-- `mlflow_experiment`: MLflow experiment name (default: "digits-recognizer-kfp")
-
-### Using the Jupyter Notebook
-
-The `notebooks/MNIST Digit Recognition.ipynb` notebook provides an interactive way to explore the pipeline:
-
-1. Open the notebook in Jupyter or VS Code
-2. Execute cells to explore data, test components, and run the pipeline
-3. View results and visualizations
-
-## Pipeline Components
+## 📊 Pipeline Components
 
 ### 1. Data Acquisition
-
-Downloads the MNIST dataset and uploads it to MinIO storage.
+- Downloads MNIST dataset using Keras
+- Validates data integrity and structure
+- Uploads processed data to MinIO storage
+- Generates data quality reports
 
 ### 2. Data Processing
-
-Reshapes and normalizes the image data, preparing it for the CNN model.
+- Normalizes pixel values to [0,1] range
+- Reshapes images for CNN input (28x28x1)
+- Applies data augmentation strategies
+- Splits data into train/validation/test sets
 
 ### 3. Model Training
-
-Builds, trains and evaluates a CNN model for digit recognition, with MLflow tracking for:
-- Model parameters
-- Training metrics
-- Model architecture
-- Confusion matrix
-- Model artifacts
+- Builds CNN architecture with configurable parameters
+- Implements early stopping and learning rate scheduling
+- Tracks experiments with MLflow (parameters, metrics, artifacts)
+- Generates model performance visualizations
+- Saves model artifacts to MinIO
 
 ### 4. Model Serving
+- Deploys trained model using KServe InferenceService
+- Configures auto-scaling and resource limits
+- Implements health checks and monitoring
+- Provides REST API for inference requests
 
-Deploys the trained model as a KServe InferenceService for online prediction.
+## 🔧 Configuration
 
-## MLflow Integration
+The pipeline uses environment variables for configuration management. Copy `.env.example` to `.env` and customize:
 
-This pipeline leverages MLflow for:
+```bash
+# MinIO Configuration
+MINIO_ENDPOINT=localhost:9000
+MINIO_ACCESS_KEY=your-access-key
+MINIO_SECRET_KEY=your-secret-key
 
-- Experiment tracking
-- Parameter logging
-- Metric recording
-- Model registration
-- Artifact storage
+# MLflow Configuration
+MLFLOW_TRACKING_URI=http://localhost:5000
+MLFLOW_S3_ENDPOINT_URL=http://localhost:9000
 
-The MLflow tracking UI can be accessed at the configured tracking server URL.
+# Kubeflow Configuration
+K8S_NAMESPACE=kubeflow
+KSERVE_SA_NAME=sa-minio-kserve
+```
 
-## Configuration
+## 📈 Experiment Tracking
 
-Configure the pipeline by editing `config/settings.py` or setting environment variables:
+The pipeline integrates deeply with MLflow for comprehensive experiment tracking:
 
-| Setting | Environment Variable | Description |
-|---------|---------------------|-------------|
-| MINIO_ENDPOINT | MINIO_ENDPOINT | MinIO server endpoint |
-| MINIO_ACCESS_KEY | MINIO_ACCESS_KEY | MinIO access key |
-| MINIO_SECRET_KEY | MINIO_SECRET_KEY | MinIO secret key |
-| MLFLOW_TRACKING_URI | MLFLOW_TRACKING_URI | MLflow tracking server URI |
-| K8S_NAMESPACE | K8S_NAMESPACE | Kubernetes namespace |
+- **Parameters**: Model architecture, training configuration, hyperparameters
+- **Metrics**: Training/validation accuracy, loss, F1-score
+- **Artifacts**: Model files, confusion matrices, training plots
+- **Model Registry**: Versioned model management with stage transitions
 
-## Development
+Access the MLflow UI at your configured tracking server to explore experiments and compare model performance.
 
-### Adding New Components
+## 🎯 Model Serving
 
-1. Create a new file in the `components/` directory
-2. Define your component using the `@component` decorator
-3. Import and use the component in `pipeline.py`
+Models are deployed using KServe for production inference:
 
-### Modifying the Pipeline
+```bash
+# Check deployment status
+kubectl get inferenceservice
 
-Edit `pipeline.py` to change the pipeline structure or add new components.
+# Send inference request
+curl -X POST http://your-kserve-endpoint/v1/models/mnist-model:predict \
+  -H "Content-Type: application/json" \
+  -d '{"instances": [{"image": [...]}]}'
+```
 
-## Troubleshooting
+## 🧪 Testing & Validation
 
-### Common Issues
+Run the test suite to validate pipeline components:
 
-1. **Connection errors to MinIO**:
-   - Verify MinIO endpoint and credentials in settings
-   - Check network connectivity to MinIO server
+```bash
+# Run unit tests
+python -m pytest tests/
 
-2. **MLflow tracking issues**:
-   - Ensure MLflow server is running
-   - Verify tracking URI is correct
-   - Check S3/MinIO bucket for MLflow exists
+# Validate pipeline compilation
+python run.py --compile-only
 
-3. **KServe deployment failures**:
-   - Verify KServe is properly installed
-   - Check service account has correct permissions
-   - Ensure model was properly saved to MinIO
+# Run integration tests
+python -m pytest tests/integration/
+```
 
-## Acknowledgments
+## 🔍 Monitoring & Observability
 
-- TensorFlow and Keras for the ML framework
-- Kubeflow for the pipeline orchestration
-- MLflow for experiment tracking
+The pipeline includes comprehensive monitoring capabilities:
 
-## License
+- **Pipeline Metrics**: Execution time, success rates, resource utilization
+- **Model Performance**: Accuracy drift, prediction latency, throughput
+- **Infrastructure**: Kubernetes pod health, storage utilization
+- **Data Quality**: Schema validation, data drift detection
 
-Copyright © 2025, Fourdotinfinity
+## 🛡️ Security Best Practices
 
-## Developers
+- Secrets managed through Kubernetes secrets or external secret managers
+- Role-based access control (RBAC) for pipeline execution
+- Network policies for secure communication between components
+- Container security scanning and vulnerability management
 
-George Levis
+## 🚀 Deployment Strategies
+
+### Development Environment
+```bash
+# Local development with Docker Compose
+docker-compose up -d
+
+# Run pipeline locally
+python run.py --local
+```
+
+### Production Environment
+```bash
+# Deploy to Kubernetes
+kubectl apply -f manifests/
+
+# Schedule pipeline execution
+python run.py --schedule "0 2 * * *"  # Daily at 2 AM
+```
+
+## 🤝 Contributing
+
+Contributions are welcome! Please follow these guidelines:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## 📝 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- **TensorFlow** team for the ML framework
+- **Kubeflow** community for pipeline orchestration
+- **MLflow** for experiment tracking capabilities
+- **KServe** for model serving infrastructure
+
+---
+
+*This project demonstrates production-ready MLOps practices with modern tooling and cloud-native architecture. Perfect for showcasing end-to-end ML pipeline development skills.*

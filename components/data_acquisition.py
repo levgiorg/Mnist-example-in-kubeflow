@@ -38,13 +38,11 @@ def get_data_batch() -> NamedTuple(
     print(f"Data loaded: x_train shape: {x_train.shape}, y_train shape: {y_train.shape}")
     
     # --- Connect to MinIO ---
-    # Verify MinIO connection variables - debugging output
     print("Setting up MinIO connection...")
-    minio_endpoint = "localhost:9000"
-    minio_access_key = "minio"
-    # Modified secret key - this MUST match exactly what's configured on your MinIO server
-    minio_secret_key = "minioadmin"
-    minio_bucket = "mlpipeline"
+    minio_endpoint = os.environ.get("MINIO_ENDPOINT", "localhost:9000")
+    minio_access_key = os.environ.get("MINIO_ACCESS_KEY", "minioadmin")
+    minio_secret_key = os.environ.get("MINIO_SECRET_KEY", "minioadmin")
+    minio_bucket = os.environ.get("MINIO_BUCKET", "mlpipeline")
     
     print(f"MinIO endpoint: {minio_endpoint}")
     print(f"MinIO access key: {minio_access_key}")
